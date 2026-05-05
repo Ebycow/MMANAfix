@@ -66,6 +66,98 @@ static TColor AntGizmoAxisColor(int Axis, int Muted)
 	return clBlack;
 }
 
+static void AntGizmoRingPoint(int Axis, double CX, double CY, double CZ,
+	double Radius, double Angle, double &X, double &Y, double &Z)
+{
+	double c = cos(Angle);
+	double s = sin(Angle);
+	X = CX;
+	Y = CY;
+	Z = CZ;
+	switch( Axis ){
+		case ANT_GIZMO_AXIS_X:
+			Y += Radius * c;
+			Z += Radius * s;
+			break;
+		case ANT_GIZMO_AXIS_Y:
+			X += Radius * c;
+			Z += Radius * s;
+			break;
+		case ANT_GIZMO_AXIS_Z:
+			X += Radius * c;
+			Y += Radius * s;
+			break;
+	}
+}
+
+static int AntGizmoRotationPlane(int Axis)
+{
+	switch( Axis ){
+		case ANT_GIZMO_AXIS_X: return ANT_DRAW_PLANE_YZ;
+		case ANT_GIZMO_AXIS_Y: return ANT_DRAW_PLANE_XZ;
+		case ANT_GIZMO_AXIS_Z: return ANT_DRAW_PLANE_XY;
+	}
+	return ANT_DRAW_PLANE_XY;
+}
+
+static double AntGizmoWorldRotationAngle(int Axis, double CX, double CY, double CZ,
+	double X, double Y, double Z)
+{
+	switch( Axis ){
+		case ANT_GIZMO_AXIS_X: return atan2(Z - CZ, Y - CY) * 180.0 / PAI;
+		case ANT_GIZMO_AXIS_Y: return atan2(Z - CZ, X - CX) * 180.0 / PAI;
+		case ANT_GIZMO_AXIS_Z: return atan2(Y - CY, X - CX) * 180.0 / PAI;
+	}
+	return 0.0;
+}
+
+static double AntGizmoNormalizeAngle(double Angle)
+{
+	while( Angle > 180.0 ) Angle -= 360.0;
+	while( Angle < -180.0 ) Angle += 360.0;
+	return Angle;
+}
+
+static double AntGizmoSnapAngle(double Angle, double Step)
+{
+	if( Step <= 0.0 ) return Angle;
+	double n = Angle / Step;
+	int rounded = (n >= 0.0) ? int(n + 0.5) : int(n - 0.5);
+	return double(rounded) * Step;
+}
+
+static void AntRotatePointAroundGizmoAxis(double &X, double &Y, double &Z,
+	double CX, double CY, double CZ, int Axis, double Angle)
+{
+	double x = X - CX;
+	double y = Y - CY;
+	double z = Z - CZ;
+	double r = Angle * PAI / 180.0;
+	double c = cos(r);
+	double s = sin(r);
+	switch( Axis ){
+		case ANT_GIZMO_AXIS_X:
+			Y = CY + (y * c) - (z * s);
+			Z = CZ + (y * s) + (z * c);
+			break;
+		case ANT_GIZMO_AXIS_Y:
+			X = CX + (x * c) - (z * s);
+			Z = CZ + (x * s) + (z * c);
+			break;
+		case ANT_GIZMO_AXIS_Z:
+			X = CX + (x * c) - (y * s);
+			Y = CY + (x * s) + (y * c);
+			break;
+	}
+}
+
+static void AntRotateWireAroundGizmoAxis(WDEF *Wire, double CX, double CY, double CZ,
+	int Axis, double Angle)
+{
+	AntRotatePointAroundGizmoAxis(Wire->X1, Wire->Y1, Wire->Z1, CX, CY, CZ, Axis, Angle);
+	AntRotatePointAroundGizmoAxis(Wire->X2, Wire->Y2, Wire->Z2, CX, CY, CZ, Axis, Angle);
+}
+
 static int AntRectContainsPoint(int L, int T, int R, int B, int X, int Y)
 {
 	return (X >= L) && (X <= R) && (Y >= T) && (Y <= B);
@@ -1271,6 +1363,67 @@ int __fastcall TMainWnd::GetAntGizmoAxisScreen(double WX, double WY, double WZ, 
 	return AntViewGizmoAxisScreen(view, WX, WY, WZ, Axis, Len, X1, Y1, X2, Y2, DX, DY);
 }
 //---------------------------------------------------------------------------
+int __fastcall TMainWnd::GetAntGizmoRingRadius(double WX, double WY, double WZ, int Axis, double &Radius)
+{
+	int cx, cy, x1, y1, x2, y2;
+	AntWorldToScreen(WX, WY, WZ, cx, cy);
+	switch( Axis ){
+		case ANT_GIZMO_AXIS_X:
+			AntWorldToScreen(WX, WY + 1.0, WZ, x1, y1);
+			AntWorldToScreen(WX, WY, WZ + 1.0, x2, y2);
+			break;
+		case ANT_GIZMO_AXIS_Y:
+			AntWorldToScreen(WX + 1.0, WY, WZ, x1, y1);
+			AntWorldToScreen(WX, WY, WZ + 1.0, x2, y2);
+			break;
+		case ANT_GIZMO_AXIS_Z:
+			AntWorldToScreen(WX + 1.0, WY, WZ, x1, y1);
+			AntWorldToScreen(WX, WY + 1.0, WZ, x2, y2);
+			break;
+		default:
+			return FALSE;
+	}
+	double dx1 = double(x1 - cx);
+	double dy1 = double(y1 - cy);
+	double dx2 = double(x2 - cx);
+	double dy2 = double(y2 - cy);
+	double d1 = sqrt((dx1 * dx1) + (dy1 * dy1));
+	double d2 = sqrt((dx2 * dx2) + (dy2 * dy2));
+	double d = (d1 > d2) ? d1 : d2;
+	if( d < 0.1 ) return FALSE;
+	Radius = 54.0 / d;
+	return TRUE;
+}
+//---------------------------------------------------------------------------
+void __fastcall TMainWnd::PaintAntRotationGizmo(double WX, double WY, double WZ, int Endpoint)
+{
+	TCanvas *Canvas = AntPaintCanvas();
+	for( int axis = 0; axis < 3; axis++ ){
+		double radius;
+		if( GetAntGizmoRingRadius(WX, WY, WZ, axis, radius) != TRUE ) continue;
+		Canvas->Pen->Color = AntGizmoAxisColor(axis, FALSE);
+		Canvas->Pen->Style = psSolid;
+		Canvas->Pen->Width = (AntGizmoDrag && (AntGizmoMode == ANT_GIZMO_MODE_ROTATE) &&
+			(AntGizmoEndpoint == Endpoint) && (AntGizmoAxis == axis)) ? 3 : 1;
+
+		int first = TRUE;
+		for( int i = 0; i <= 72; i++ ){
+			double angle = (double(i) * PAI2) / 72.0;
+			double rx, ry, rz;
+			AntGizmoRingPoint(axis, WX, WY, WZ, radius, angle, rx, ry, rz);
+			int sx, sy;
+			AntWorldToScreen(rx, ry, rz, sx, sy);
+			if( first ){
+				Canvas->MoveTo(sx, sy);
+				first = FALSE;
+			}
+			else {
+				Canvas->LineTo(sx, sy);
+			}
+		}
+	}
+}
+//---------------------------------------------------------------------------
 void __fastcall TMainWnd::PaintAntEditGizmo(void)
 {
 	if( AntDrawMode || !exeenv.Ant3D ) return;
@@ -1294,6 +1447,7 @@ void __fastcall TMainWnd::PaintAntEditGizmo(void)
 		Canvas->Pen->Width = 1;
 		Canvas->Brush->Style = bsClear;
 		Canvas->Rectangle(sx-5, sy-5, sx+6, sy+6);
+		PaintAntRotationGizmo(wx, wy, wz, 3);
 		for( int axis = 0; axis < 3; axis++ ){
 			int x1, y1, x2, y2;
 			double dx, dy;
@@ -1303,7 +1457,8 @@ void __fastcall TMainWnd::PaintAntEditGizmo(void)
 				case ANT_GIZMO_AXIS_Y: Canvas->Pen->Color = clGreen; break;
 				case ANT_GIZMO_AXIS_Z: Canvas->Pen->Color = clBlue; break;
 			}
-			Canvas->Pen->Width = (AntGizmoDrag && (AntGizmoEndpoint == 3) && (AntGizmoAxis == axis)) ? 3 : 2;
+			Canvas->Pen->Width = (AntGizmoDrag && (AntGizmoMode == ANT_GIZMO_MODE_MOVE) &&
+				(AntGizmoEndpoint == 3) && (AntGizmoAxis == axis)) ? 3 : 2;
 			AntViewDrawScreenArrow(Canvas, x1, y1, x2, y2);
 		}
 		PaintAntGizmoMoveDistance();
@@ -1335,13 +1490,14 @@ void __fastcall TMainWnd::PaintAntEditGizmo(void)
 		Canvas->Pen->Width = 1;
 		Canvas->Brush->Style = bsClear;
 		Canvas->Ellipse(sx-4, sy-4, sx+5, sy+5);
+		if( endp == 2 ) PaintAntRotationGizmo(wx, wy, wz, endp);
 
 		for( int axis = 0; axis < 3; axis++ ){
 			int x1, y1, x2, y2;
 			double dx, dy;
 			if( GetAntGizmoAxisScreen(wx, wy, wz, axis, 42, x1, y1, x2, y2, dx, dy) != TRUE ) continue;
 			Canvas->Pen->Color = AntGizmoAxisColor(axis, endp == 2);
-			Canvas->Pen->Width = (AntGizmoDrag && (AntGizmoWire == w) &&
+			Canvas->Pen->Width = (AntGizmoDrag && (AntGizmoMode == ANT_GIZMO_MODE_MOVE) && (AntGizmoWire == w) &&
 				(AntGizmoEndpoint == endp) && (AntGizmoAxis == axis)) ? 3 : 2;
 			AntViewDrawScreenArrow(Canvas, x1, y1, x2, y2);
 		}
@@ -1462,7 +1618,43 @@ int __fastcall TMainWnd::FindAntSnapEdge(int X, int Y, double &WX, double &WY, d
 	return AntViewFindSnapEdge(&ant, view, AntWireSelected, AntWireSelectionCount, Grid2->Row - 1, X, Y, WX, WY, WZ);
 }
 //---------------------------------------------------------------------------
-int __fastcall TMainWnd::HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis)
+int __fastcall TMainWnd::HitAntRotationGizmo(double WX, double WY, double WZ, int Endpoint,
+	int X, int Y, int &HitEndpoint, int &Axis, int &Mode, double &Best)
+{
+	int found = FALSE;
+	for( int axis = 0; axis < 3; axis++ ){
+		double radius;
+		if( GetAntGizmoRingRadius(WX, WY, WZ, axis, radius) != TRUE ) continue;
+		int first = TRUE;
+		int px = 0;
+		int py = 0;
+		for( int i = 0; i <= 72; i++ ){
+			double angle = (double(i) * PAI2) / 72.0;
+			double rx, ry, rz;
+			AntGizmoRingPoint(axis, WX, WY, WZ, radius, angle, rx, ry, rz);
+			int sx, sy;
+			AntWorldToScreen(rx, ry, rz, sx, sy);
+			if( first ){
+				first = FALSE;
+			}
+			else {
+				double d = AntViewSqDistPointToSegment(X, Y, px, py, sx, sy);
+				if( d < Best ){
+					Best = d;
+					HitEndpoint = Endpoint;
+					Axis = axis;
+					Mode = ANT_GIZMO_MODE_ROTATE;
+					found = TRUE;
+				}
+			}
+			px = sx;
+			py = sy;
+		}
+	}
+	return found;
+}
+//---------------------------------------------------------------------------
+int __fastcall TMainWnd::HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis, int &Mode)
 {
 	if( AntDrawMode || !exeenv.Ant3D ) return FALSE;
 	int SelCount = GetAntSelectionCount();
@@ -1470,6 +1662,7 @@ int __fastcall TMainWnd::HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis)
 
 	double best = (8.0 * 8.0) + 1.0;
 	int found = FALSE;
+	Mode = ANT_GIZMO_MODE_MOVE;
 	if( SelCount > 1 ){
 		double wx, wy, wz;
 		if( GetAntSelectionCenter(wx, wy, wz) == TRUE ){
@@ -1480,6 +1673,7 @@ int __fastcall TMainWnd::HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis)
 			if( ((mdx * mdx) + (mdy * mdy)) <= (7 * 7) ){
 				Endpoint = 3;
 				Axis = -1;
+				Mode = ANT_GIZMO_MODE_MOVE;
 				return TRUE;
 			}
 			for( int axis = 0; axis < 3; axis++ ){
@@ -1491,8 +1685,12 @@ int __fastcall TMainWnd::HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis)
 					best = d;
 					Endpoint = 3;
 					Axis = axis;
+					Mode = ANT_GIZMO_MODE_MOVE;
 					found = TRUE;
 				}
+			}
+			if( HitAntRotationGizmo(wx, wy, wz, 3, X, Y, Endpoint, Axis, Mode, best) == TRUE ){
+				found = TRUE;
 			}
 		}
 		return found;
@@ -1517,6 +1715,7 @@ int __fastcall TMainWnd::HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis)
 		if( ((mdx * mdx) + (mdy * mdy)) <= (7 * 7) ){
 			Endpoint = endp;
 			Axis = -1;
+			Mode = ANT_GIZMO_MODE_MOVE;
 			return TRUE;
 		}
 		for( int axis = 0; axis < 3; axis++ ){
@@ -1528,6 +1727,12 @@ int __fastcall TMainWnd::HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis)
 				best = d;
 				Endpoint = endp;
 				Axis = axis;
+				Mode = ANT_GIZMO_MODE_MOVE;
+				found = TRUE;
+			}
+		}
+		if( endp == 2 ){
+			if( HitAntRotationGizmo(wx, wy, wz, endp, X, Y, Endpoint, Axis, Mode, best) == TRUE ){
 				found = TRUE;
 			}
 		}
@@ -1537,8 +1742,8 @@ int __fastcall TMainWnd::HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis)
 //---------------------------------------------------------------------------
 int __fastcall TMainWnd::BeginAntGizmoDrag(int X, int Y)
 {
-	int endpoint, axis;
-	if( HitAntEditGizmo(X, Y, endpoint, axis) != TRUE ) return FALSE;
+	int endpoint, axis, mode;
+	if( HitAntEditGizmo(X, Y, endpoint, axis, mode) != TRUE ) return FALSE;
 	PushAntUndo();
 	int w = Grid2->Row - 1;
 	if( (w < 0) || (w >= ant.wmax) ) return FALSE;
@@ -1558,18 +1763,25 @@ int __fastcall TMainWnd::BeginAntGizmoDrag(int X, int Y)
 	int x1, y1, x2, y2;
 	double dx = 0.0;
 	double dy = 0.0;
-	if( axis >= 0 ){
+	double startAngle = 0.0;
+	if( (mode == ANT_GIZMO_MODE_MOVE) && (axis >= 0) ){
 		if( GetAntGizmoAxisScreen(wx, wy, wz, axis, 42, x1, y1, x2, y2, dx, dy) != TRUE ) return FALSE;
+	}
+	else if( mode == ANT_GIZMO_MODE_ROTATE ){
+		if( GetAntGizmoRotationMouseAngle(X, Y, axis, wx, wy, wz, startAngle) != TRUE ) return FALSE;
 	}
 
 	AntGizmoDrag = TRUE;
 	AntGizmoEndpoint = endpoint;
 	AntGizmoAxis = axis;
+	AntGizmoMode = mode;
 	AntGizmoWire = w;
 	AntGizmoMouseX = X;
 	AntGizmoMouseY = Y;
 	AntGizmoAxisDX = dx;
 	AntGizmoAxisDY = dy;
+	AntGizmoStartAngle = startAngle;
+	AntGizmoAngle = 0.0;
 	memcpy(&AntGizmoOldW, wp, sizeof(WDEF));
 	memcpy(AntGizmoOldSelected, ant.wdef, sizeof(AntGizmoOldSelected));
 	PBoxAntIgnoreClick = TRUE;
@@ -1642,6 +1854,43 @@ void __fastcall TMainWnd::GetAntGizmoFreeDelta(int X, int Y, double &DX, double 
 	DZ = (bx2 * px) + (by2 * py);
 }
 //---------------------------------------------------------------------------
+int __fastcall TMainWnd::GetAntGizmoRotationMouseAngle(int X, int Y, int Axis,
+	double CX, double CY, double CZ, double &Angle)
+{
+	TAntViewParams view;
+	view.Width = PBoxAnt->Width;
+	view.Height = PBoxAnt->Height;
+	view.CenterX = exeenv.AntXc;
+	view.CenterY = exeenv.AntYc;
+	view.Deg = TBarDeg->Position;
+	view.ZDeg = TBarZDeg->Position;
+	view.Scale = GetAntViewScale();
+	view.UnitScale = GetAntViewUnitScale();
+
+	TAntDrawPlaneState plane;
+	plane.Plane = AntGizmoRotationPlane(Axis);
+	plane.Active = TRUE;
+	plane.X1 = CX;
+	plane.Y1 = CY;
+	plane.Z1 = CZ;
+
+	double wx, wy, wz;
+	if( AntViewScreenToPlane(view, plane, X, Y, wx, wy, wz) == TRUE ){
+		if( (ABS(wx - CX) + ABS(wy - CY) + ABS(wz - CZ)) > 1.0e-9 ){
+			Angle = AntGizmoWorldRotationAngle(Axis, CX, CY, CZ, wx, wy, wz);
+			return TRUE;
+		}
+	}
+
+	int sx, sy;
+	AntWorldToScreen(CX, CY, CZ, sx, sy);
+	double dx = double(X - sx);
+	double dy = double(sy - Y);
+	if( ((dx * dx) + (dy * dy)) < 1.0 ) return FALSE;
+	Angle = atan2(dy, dx) * 180.0 / PAI;
+	return TRUE;
+}
+//---------------------------------------------------------------------------
 void __fastcall TMainWnd::UpdateAntGizmoDrag(int X, int Y, TShiftState Shift)
 {
 	if( !AntGizmoDrag ) return;
@@ -1651,11 +1900,27 @@ void __fastcall TMainWnd::UpdateAntGizmoDrag(int X, int Y, TShiftState Shift)
 	bool ctrl = AntCtrlDown(Shift);
 	bool shift = AntShiftDown(Shift);
 	bool moveConnected = ctrl && shift;
-	AntGizmoShowSnapVertices = shift && !ctrl;
+	AntGizmoShowSnapVertices = (AntGizmoMode == ANT_GIZMO_MODE_MOVE) && shift && !ctrl;
 	memcpy(ant.wdef, AntGizmoOldSelected, sizeof(WDEF) * ant.wmax);
 	WDEF *wp = &ant.wdef[AntGizmoWire];
 	double sx, sy, sz;
 	GetAntGizmoAnchor(sx, sy, sz);
+	if( AntGizmoMode == ANT_GIZMO_MODE_ROTATE ){
+		double angle;
+		if( GetAntGizmoRotationMouseAngle(X, Y, AntGizmoAxis, sx, sy, sz, angle) != TRUE ) return;
+		AntGizmoAngle = AntGizmoNormalizeAngle(angle - AntGizmoStartAngle);
+		if( ctrl ) AntGizmoAngle = AntGizmoSnapAngle(AntGizmoAngle, 15.0);
+		else if( shift ) AntGizmoAngle = AntGizmoSnapAngle(AntGizmoAngle, 5.0);
+		for( int i = 0; i < ant.wmax; i++ ){
+			if( !IsAntWireSelected(i) ) continue;
+			memcpy(&ant.wdef[i], &AntGizmoOldSelected[i], sizeof(WDEF));
+			AntRotateWireAroundGizmoAxis(&ant.wdef[i], sx, sy, sz, AntGizmoAxis, AntGizmoAngle);
+		}
+		ant.Edit = ant.Flag = 1;
+		Grid2->Invalidate();
+		PBoxAnt->Invalidate();
+		return;
+	}
 	if( AntGizmoAxis < 0 ){
 		double dx, dy, dz;
 		GetAntGizmoFreeDelta(X, Y, dx, dy, dz);
@@ -1821,6 +2086,9 @@ void __fastcall TMainWnd::EndAntGizmoDrag(void)
 	AntGizmoDrag = FALSE;
 	AntGizmoWire = -1;
 	AntGizmoShowSnapVertices = FALSE;
+	AntGizmoMode = ANT_GIZMO_MODE_MOVE;
+	AntGizmoStartAngle = 0.0;
+	AntGizmoAngle = 0.0;
 	PBoxAnt->Cursor = AntDrawMode ? crCross : crDefault;
 	if( (w >= 0) && (w < ant.wmax) ){
 		if( AntGizmoEndpoint == 3 ){
@@ -1845,6 +2113,16 @@ void __fastcall TMainWnd::PaintAntGizmoMoveDistance(void)
 	if( (AntGizmoWire < 0) || (AntGizmoWire >= ant.wmax) ) return;
 
 	double ox, oy, oz;
+	if( AntGizmoMode == ANT_GIZMO_MODE_ROTATE ){
+		GetAntGizmoAnchor(ox, oy, oz);
+		int sx, sy;
+		AntWorldToScreen(ox, oy, oz, sx, sy);
+		char bf[160];
+		sprintf(bf, "Rotate:%.1f deg", AntGizmoAngle);
+		PaintAntLengthLabel(AntPaintCanvas(), PBoxAnt->Width, PBoxAnt->Height, sx, sy, bf);
+		return;
+	}
+
 	double cx, cy, cz;
 	GetAntGizmoAnchor(ox, oy, oz);
 	WDEF *wp = &ant.wdef[AntGizmoWire];

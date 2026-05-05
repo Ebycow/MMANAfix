@@ -487,16 +487,22 @@ private:	// ユーザー宣言
 	int __fastcall SnapAntDrawPoint(int X, int Y, double &WX, double &WY, double &WZ);
 	int __fastcall GetAntGizmoAxisScreen(double WX, double WY, double WZ, int Axis, int Len,
 		int &X1, int &Y1, int &X2, int &Y2, double &DX, double &DY);
+	int __fastcall GetAntGizmoRingRadius(double WX, double WY, double WZ, int Axis, double &Radius);
+	void __fastcall PaintAntRotationGizmo(double WX, double WY, double WZ, int Endpoint);
 	void __fastcall PaintAntEditGizmo(void);
 	void __fastcall PaintAntSnapVertices(void);
 	void __fastcall PaintAntDrawSnapPoint(void);
 	void __fastcall PaintAntSelectionRect(void);
 	int __fastcall FindAntSnapVertex(int X, int Y, double &WX, double &WY, double &WZ);
 	int __fastcall FindAntSnapEdge(int X, int Y, double &WX, double &WY, double &WZ);
-	int __fastcall HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis);
+	int __fastcall HitAntRotationGizmo(double WX, double WY, double WZ, int Endpoint,
+		int X, int Y, int &HitEndpoint, int &Axis, int &Mode, double &Best);
+	int __fastcall HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis, int &Mode);
 	int __fastcall BeginAntGizmoDrag(int X, int Y);
 	void __fastcall GetAntGizmoAnchor(double &X, double &Y, double &Z);
 	void __fastcall GetAntGizmoFreeDelta(int X, int Y, double &DX, double &DY, double &DZ);
+	int __fastcall GetAntGizmoRotationMouseAngle(int X, int Y, int Axis,
+		double CX, double CY, double CZ, double &Angle);
 	void __fastcall UpdateAntGizmoDrag(int X, int Y, TShiftState Shift);
 	void __fastcall EndAntGizmoDrag(void);
 	void __fastcall PaintAntGizmoMoveDistance(void);
@@ -545,6 +551,9 @@ private:	// ユーザー宣言
 	int		AntGizmoMouseY;
 	double	AntGizmoAxisDX;
 	double	AntGizmoAxisDY;
+	int		AntGizmoMode;
+	double	AntGizmoStartAngle;
+	double	AntGizmoAngle;
 	WDEF	AntGizmoOldW;
 	TStringList	*AntUndoList;
 	TStringList	*AntRedoList;

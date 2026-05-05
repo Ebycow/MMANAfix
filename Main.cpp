@@ -96,6 +96,9 @@ __fastcall TMainWnd::TMainWnd(TComponent* Owner)
 	AntGizmoWire = -1;
 	AntGizmoMouseX = AntGizmoMouseY = 0;
 	AntGizmoAxisDX = AntGizmoAxisDY = 0.0;
+	AntGizmoMode = ANT_GIZMO_MODE_MOVE;
+	AntGizmoStartAngle = 0.0;
+	AntGizmoAngle = 0.0;
 	memset(&AntGizmoOldW, 0, sizeof(WDEF));
 	AntUndoList = new TStringList;
 	AntRedoList = new TStringList;

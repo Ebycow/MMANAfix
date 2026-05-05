@@ -14,4 +14,9 @@ enum {
 	ANT_GIZMO_AXIS_Z
 };
 
+enum {
+	ANT_GIZMO_MODE_MOVE = 0,
+	ANT_GIZMO_MODE_ROTATE
+};
+
 #endif
