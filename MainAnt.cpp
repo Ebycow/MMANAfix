@@ -118,6 +118,48 @@ static int AntSegmentIntersectsRect(int X1, int Y1, int X2, int Y2,
 	return FALSE;
 }
 
+static int AntSamePoint(double X1, double Y1, double Z1, double X2, double Y2, double Z2)
+{
+	return (X1 == X2) && (Y1 == Y2) && (Z1 == Z2);
+}
+
+static void AntMoveConnectedPoint(WDEF *Wires, const WDEF *OldWires, int WMax,
+	double OldX, double OldY, double OldZ, double NewX, double NewY, double NewZ)
+{
+	if( AntSamePoint(OldX, OldY, OldZ, NewX, NewY, NewZ) ) return;
+	for( int i = 0; i < WMax; i++ ){
+		if( AntSamePoint(OldWires[i].X1, OldWires[i].Y1, OldWires[i].Z1, OldX, OldY, OldZ) ){
+			Wires[i].X1 = NewX;
+			Wires[i].Y1 = NewY;
+			Wires[i].Z1 = NewZ;
+		}
+		if( AntSamePoint(OldWires[i].X2, OldWires[i].Y2, OldWires[i].Z2, OldX, OldY, OldZ) ){
+			Wires[i].X2 = NewX;
+			Wires[i].Y2 = NewY;
+			Wires[i].Z2 = NewZ;
+		}
+	}
+}
+
+static void AntMoveConnectedWirePoints(WDEF *Wires, const WDEF *OldWires, int WMax,
+	const WDEF &OldWire, const WDEF &NewWire)
+{
+	AntMoveConnectedPoint(Wires, OldWires, WMax,
+		OldWire.X1, OldWire.Y1, OldWire.Z1, NewWire.X1, NewWire.Y1, NewWire.Z1);
+	AntMoveConnectedPoint(Wires, OldWires, WMax,
+		OldWire.X2, OldWire.Y2, OldWire.Z2, NewWire.X2, NewWire.Y2, NewWire.Z2);
+}
+
+static int AntCtrlDown(TShiftState Shift)
+{
+	return Shift.Contains(ssCtrl) || ((::GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0);
+}
+
+static int AntShiftDown(TShiftState Shift)
+{
+	return Shift.Contains(ssShift) || ((::GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
+}
+
 static TCanvas *AntPaintBufferCanvas = NULL;
 
 //---------------------------------------------------------------------------
@@ -1604,23 +1646,19 @@ void __fastcall TMainWnd::UpdateAntGizmoDrag(int X, int Y, TShiftState Shift)
 {
 	if( !AntGizmoDrag ) return;
 	if( (AntGizmoWire < 0) || (AntGizmoWire >= ant.wmax) ) return;
-	WDEF *wp = &ant.wdef[AntGizmoWire];
 	double mx = double(X - AntGizmoMouseX);
 	double my = double(Y - AntGizmoMouseY);
-	bool ctrl = Shift.Contains(ssCtrl);
-	bool shift = Shift.Contains(ssShift);
+	bool ctrl = AntCtrlDown(Shift);
+	bool shift = AntShiftDown(Shift);
+	bool moveConnected = ctrl && shift;
 	AntGizmoShowSnapVertices = shift && !ctrl;
+	memcpy(ant.wdef, AntGizmoOldSelected, sizeof(WDEF) * ant.wmax);
+	WDEF *wp = &ant.wdef[AntGizmoWire];
 	double sx, sy, sz;
 	GetAntGizmoAnchor(sx, sy, sz);
 	if( AntGizmoAxis < 0 ){
-		int dragX = X;
-		int dragY = Y;
-		if( ctrl && shift ){
-			if( ABS(mx) >= ABS(my) ) dragY = AntGizmoMouseY;
-			else dragX = AntGizmoMouseX;
-		}
 		double dx, dy, dz;
-		GetAntGizmoFreeDelta(dragX, dragY, dx, dy, dz);
+		GetAntGizmoFreeDelta(X, Y, dx, dy, dz);
 		int rx, ry;
 		AntWorldToScreen(sx + dx, sy + dy, sz + dz, rx, ry);
 		double tx, ty, tz;
@@ -1657,6 +1695,29 @@ void __fastcall TMainWnd::UpdateAntGizmoDrag(int X, int Y, TShiftState Shift)
 				ant.wdef[i].X2 += dx; ant.wdef[i].Y2 += dy; ant.wdef[i].Z2 += dz;
 			}
 		}
+		if( moveConnected ){
+			if( AntGizmoEndpoint == 0 ){
+				AntMoveConnectedPoint(ant.wdef, AntGizmoOldSelected, ant.wmax,
+					AntGizmoOldW.X1, AntGizmoOldW.Y1, AntGizmoOldW.Z1,
+					wp->X1, wp->Y1, wp->Z1);
+			}
+			else if( AntGizmoEndpoint == 1 ){
+				AntMoveConnectedPoint(ant.wdef, AntGizmoOldSelected, ant.wmax,
+					AntGizmoOldW.X2, AntGizmoOldW.Y2, AntGizmoOldW.Z2,
+					wp->X2, wp->Y2, wp->Z2);
+			}
+			else if( AntGizmoEndpoint == 2 ){
+				AntMoveConnectedWirePoints(ant.wdef, AntGizmoOldSelected, ant.wmax, AntGizmoOldW, *wp);
+			}
+			else if( AntGizmoEndpoint == 3 ){
+				for( int i = 0; i < ant.wmax; i++ ){
+					if( IsAntWireSelected(i) ){
+						AntMoveConnectedWirePoints(ant.wdef, AntGizmoOldSelected, ant.wmax,
+							AntGizmoOldSelected[i], ant.wdef[i]);
+					}
+				}
+			}
+		}
 		ant.Edit = ant.Flag = 1;
 		Grid2->Invalidate();
 		PBoxAnt->Invalidate();
@@ -1665,10 +1726,6 @@ void __fastcall TMainWnd::UpdateAntGizmoDrag(int X, int Y, TShiftState Shift)
 	double len2 = (AntGizmoAxisDX * AntGizmoAxisDX) + (AntGizmoAxisDY * AntGizmoAxisDY);
 	if( len2 <= 0.0 ) return;
 
-	if( ctrl && shift ){
-		if( ABS(mx) >= ABS(my) ) my = 0.0;
-		else mx = 0.0;
-	}
 	double d = ((mx * AntGizmoAxisDX) + (my * AntGizmoAxisDY)) / len2;
 	double ax = (AntGizmoAxis == ANT_GIZMO_AXIS_X) ? 1.0 : 0.0;
 	double ay = (AntGizmoAxis == ANT_GIZMO_AXIS_Y) ? 1.0 : 0.0;
@@ -1726,6 +1783,29 @@ void __fastcall TMainWnd::UpdateAntGizmoDrag(int X, int Y, TShiftState Shift)
 				case ANT_GIZMO_AXIS_X: ant.wdef[i].X1 += d; ant.wdef[i].X2 += d; break;
 				case ANT_GIZMO_AXIS_Y: ant.wdef[i].Y1 += d; ant.wdef[i].Y2 += d; break;
 				case ANT_GIZMO_AXIS_Z: ant.wdef[i].Z1 += d; ant.wdef[i].Z2 += d; break;
+			}
+		}
+	}
+	if( moveConnected ){
+		if( AntGizmoEndpoint == 0 ){
+			AntMoveConnectedPoint(ant.wdef, AntGizmoOldSelected, ant.wmax,
+				AntGizmoOldW.X1, AntGizmoOldW.Y1, AntGizmoOldW.Z1,
+				wp->X1, wp->Y1, wp->Z1);
+		}
+		else if( AntGizmoEndpoint == 1 ){
+			AntMoveConnectedPoint(ant.wdef, AntGizmoOldSelected, ant.wmax,
+				AntGizmoOldW.X2, AntGizmoOldW.Y2, AntGizmoOldW.Z2,
+				wp->X2, wp->Y2, wp->Z2);
+		}
+		else if( AntGizmoEndpoint == 2 ){
+			AntMoveConnectedWirePoints(ant.wdef, AntGizmoOldSelected, ant.wmax, AntGizmoOldW, *wp);
+		}
+		else if( AntGizmoEndpoint == 3 ){
+			for( int i = 0; i < ant.wmax; i++ ){
+				if( IsAntWireSelected(i) ){
+					AntMoveConnectedWirePoints(ant.wdef, AntGizmoOldSelected, ant.wmax,
+						AntGizmoOldSelected[i], ant.wdef[i]);
+				}
 			}
 		}
 	}
@@ -2001,6 +2081,7 @@ void __fastcall TMainWnd::PBoxAntMouseUp(TObject *Sender, TMouseButton Button,
 	TShiftState Shift, int X, int Y)
 {
 	if( AntGizmoDrag ){
+		UpdateAntGizmoDrag(X, Y, Shift);
 		EndAntGizmoDrag();
 		PBoxAntIgnoreClick = TRUE;
 		return;
