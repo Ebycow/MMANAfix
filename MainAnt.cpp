@@ -1083,6 +1083,13 @@ void __fastcall TMainWnd::RotateSelected90Click(TObject *Sender)
 	RotateSelectedWires90();
 }
 //---------------------------------------------------------------------------
+void __fastcall TMainWnd::ToggleAntRotationGizmoClick(TObject *Sender)
+{
+	AntRotationGizmoVisible = AntRotationGizmoVisible ? FALSE : TRUE;
+	UpdateAntDrawControls();
+	PBoxAnt->Invalidate();
+}
+//---------------------------------------------------------------------------
 void __fastcall TMainWnd::CreateAntDrawControls(void)
 {
 	if( AntDrawBtn != NULL ) return;
@@ -1149,13 +1156,21 @@ void __fastcall TMainWnd::CreateAntDrawControls(void)
 	AntRotate90Btn->ShowHint = true;
 	AntRotate90Btn->OnClick = RotateSelected90Click;
 
+	AntRotationGizmoBtn = new TButton(this);
+	AntRotationGizmoBtn->Parent = TabSheet2;
+	AntRotationGizmoBtn->Caption = "Rot";
+	AntRotationGizmoBtn->TabStop = false;
+	AntRotationGizmoBtn->Hint = "Show/hide rotation gizmo";
+	AntRotationGizmoBtn->ShowHint = true;
+	AntRotationGizmoBtn->OnClick = ToggleAntRotationGizmoClick;
+
 	LayoutAntDrawControls();
 	UpdateAntDrawControls();
 }
 //---------------------------------------------------------------------------
 void __fastcall TMainWnd::LayoutAntDrawControls(void)
 {
-	if( (AntDrawBtn == NULL) || (AntAlignX0Btn == NULL) || (AntAlignZ0Btn == NULL) || (AllViewBtn == NULL) || (OrgBtn == NULL) ) return;
+	if( (AntDrawBtn == NULL) || (AntAlignX0Btn == NULL) || (AntAlignZ0Btn == NULL) || (AntRotationGizmoBtn == NULL) || (AllViewBtn == NULL) || (OrgBtn == NULL) ) return;
 
 	const int gap = 4;
 	const int drawW = 54;
@@ -1163,6 +1178,7 @@ void __fastcall TMainWnd::LayoutAntDrawControls(void)
 	const int cancelW = 50;
 	const int alignW = 36;
 	const int rotateW = 44;
+	const int rotateGizmoW = 40;
 	int top = OrgBtn->Top;
 	int h = OrgBtn->Height;
 
@@ -1185,10 +1201,11 @@ void __fastcall TMainWnd::LayoutAntDrawControls(void)
 		AntAlignY0Btn->Font->Assign(Font);
 		AntAlignZ0Btn->Font->Assign(Font);
 		AntRotate90Btn->Font->Assign(Font);
+		AntRotationGizmoBtn->Font->Assign(Font);
 	}
 
 	int total = drawW + gap + planeW + gap + planeW + gap + planeW + gap +
-		cancelW + gap + alignW + gap + alignW + gap + alignW + gap + rotateW;
+		cancelW + gap + alignW + gap + alignW + gap + alignW + gap + rotateW + gap + rotateGizmoW;
 	int left = AllViewBtn->Left - gap - total;
 	if( left < 2 ) left = 2;
 
@@ -1209,6 +1226,8 @@ void __fastcall TMainWnd::LayoutAntDrawControls(void)
 	AntAlignZ0Btn->SetBounds(left, top, alignW, h);
 	left += alignW + gap;
 	AntRotate90Btn->SetBounds(left, top, rotateW, h);
+	left += rotateW + gap;
+	AntRotationGizmoBtn->SetBounds(left, top, rotateGizmoW, h);
 }
 //---------------------------------------------------------------------------
 void __fastcall TMainWnd::UpdateAntDrawControls(void)
@@ -1226,11 +1245,13 @@ void __fastcall TMainWnd::UpdateAntDrawControls(void)
 	AntAlignY0Btn->Enabled = selected;
 	AntAlignZ0Btn->Enabled = selected;
 	AntRotate90Btn->Enabled = selected;
+	AntRotationGizmoBtn->Enabled = enabled;
 
 	AntDrawBtn->Caption = AntDrawMode ? "[Draw]" : "Draw";
 	AntDrawXYBtn->Caption = (AntDrawPlane == ANT_DRAW_PLANE_XY) ? "[XY]" : "XY";
 	AntDrawXZBtn->Caption = (AntDrawPlane == ANT_DRAW_PLANE_XZ) ? "[XZ]" : "XZ";
 	AntDrawYZBtn->Caption = (AntDrawPlane == ANT_DRAW_PLANE_YZ) ? "[YZ]" : "YZ";
+	AntRotationGizmoBtn->Caption = AntRotationGizmoVisible ? "[Rot]" : "Rot";
 
 	if( KAntDrawWire != NULL ){
 		KAntDrawWire->Checked = AntDrawMode ? true : false;
@@ -1397,6 +1418,7 @@ int __fastcall TMainWnd::GetAntGizmoRingRadius(double WX, double WY, double WZ, 
 //---------------------------------------------------------------------------
 void __fastcall TMainWnd::PaintAntRotationGizmo(double WX, double WY, double WZ, int Endpoint)
 {
+	if( !AntRotationGizmoVisible ) return;
 	TCanvas *Canvas = AntPaintCanvas();
 	for( int axis = 0; axis < 3; axis++ ){
 		double radius;
@@ -1621,6 +1643,7 @@ int __fastcall TMainWnd::FindAntSnapEdge(int X, int Y, double &WX, double &WY, d
 int __fastcall TMainWnd::HitAntRotationGizmo(double WX, double WY, double WZ, int Endpoint,
 	int X, int Y, int &HitEndpoint, int &Axis, int &Mode, double &Best)
 {
+	if( !AntRotationGizmoVisible ) return FALSE;
 	int found = FALSE;
 	for( int axis = 0; axis < 3; axis++ ){
 		double radius;

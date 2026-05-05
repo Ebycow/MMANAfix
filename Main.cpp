@@ -83,7 +83,9 @@ __fastcall TMainWnd::TMainWnd(TComponent* Owner)
 	AntAlignY0Btn = NULL;
 	AntAlignZ0Btn = NULL;
 	AntRotate90Btn = NULL;
+	AntRotationGizmoBtn = NULL;
 	AntDrawMode = FALSE;
+	AntRotationGizmoVisible = TRUE;
 	AntDrawActive = FALSE;
 	AntDrawPlane = ANT_DRAW_PLANE_XY;
 	AntDrawX1 = AntDrawY1 = AntDrawZ1 = 0.0;

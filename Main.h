@@ -474,6 +474,7 @@ private:	// ユーザー宣言
 	void __fastcall AlignSelectedY0Click(TObject *Sender);
 	void __fastcall AlignSelectedZ0Click(TObject *Sender);
 	void __fastcall RotateSelected90Click(TObject *Sender);
+	void __fastcall ToggleAntRotationGizmoClick(TObject *Sender);
 	void __fastcall CreateAntDrawControls(void);
 	void __fastcall LayoutAntDrawControls(void);
 	void __fastcall LayoutQuadPanels(void);
@@ -531,6 +532,7 @@ private:	// ユーザー宣言
 	int		AutoCalcPending;
 	int		AutoCalcRunning;
 	int		AntDrawMode;
+	int		AntRotationGizmoVisible;
 	int		AntDrawActive;
 	int		AntDrawPlane;
 	double	AntDrawX1;
@@ -599,6 +601,7 @@ private:	// ユーザー宣言
 	TButton			*AntAlignY0Btn;
 	TButton			*AntAlignZ0Btn;
 	TButton			*AntRotate90Btn;
+	TButton			*AntRotationGizmoBtn;
 
 	bool            QuadMode;
 	bool            QuadSwitching;
