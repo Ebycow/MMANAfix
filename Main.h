@@ -500,6 +500,9 @@ private:	// ユーザー宣言
 		int X, int Y, int &HitEndpoint, int &Axis, int &Mode, double &Best);
 	int __fastcall HitAntEditGizmo(int X, int Y, int &Endpoint, int &Axis, int &Mode);
 	int __fastcall BeginAntGizmoDrag(int X, int Y);
+	void __fastcall ResetAntGizmoDrag(void);
+	int __fastcall ApplyAntGizmoInput(double DX, double DY, double DZ, double Angle);
+	int __fastcall ShowAntGizmoInput(void);
 	void __fastcall GetAntGizmoAnchor(double &X, double &Y, double &Z);
 	void __fastcall GetAntGizmoFreeDelta(int X, int Y, double &DX, double &DY, double &DZ);
 	int __fastcall GetAntGizmoRotationMouseAngle(int X, int Y, int Axis,
@@ -546,6 +549,7 @@ private:	// ユーザー宣言
 	double	AntDrawSnapY;
 	double	AntDrawSnapZ;
 	int		AntGizmoDrag;
+	int		AntGizmoDragMoved;
 	int		AntGizmoEndpoint;
 	int		AntGizmoAxis;
 	int		AntGizmoWire;

@@ -66,6 +66,127 @@ static TColor AntGizmoAxisColor(int Axis, int Muted)
 	return clBlack;
 }
 
+static LPCSTR AntGizmoAxisText(int Axis)
+{
+	switch( Axis ){
+		case ANT_GIZMO_AXIS_X: return "X";
+		case ANT_GIZMO_AXIS_Y: return "Y";
+		case ANT_GIZMO_AXIS_Z: return "Z";
+	}
+	return "";
+}
+
+static TEdit *AntGizmoCreateEdit(TForm *Dlg, int Left, int Top, int Width, int Enabled)
+{
+	TEdit *Edit = new TEdit(Dlg);
+	Edit->Parent = Dlg;
+	Edit->Left = Left;
+	Edit->Top = Top;
+	Edit->Width = Width;
+	Edit->Text = "0";
+	Edit->Enabled = Enabled;
+	return Edit;
+}
+
+static TLabel *AntGizmoCreateLabel(TForm *Dlg, LPCSTR Text, int Left, int Top)
+{
+	TLabel *Label = new TLabel(Dlg);
+	Label->Parent = Dlg;
+	Label->Left = Left;
+	Label->Top = Top + 4;
+	Label->Caption = Text;
+	return Label;
+}
+
+static int AntGizmoCalcEdit(TEdit *Edit, double &Value)
+{
+	AnsiString Text(Edit->Text);
+	if( Text.Length() <= 0 ) Text = "0";
+	return Calc(Value, Text.c_str());
+}
+
+static int AntGizmoPromptInput(TComponent *Owner, int Mode, int Axis,
+	double &DX, double &DY, double &DZ, double &Angle)
+{
+	DX = DY = DZ = Angle = 0.0;
+
+	TForm *Dlg = new TForm(Owner);
+	Dlg->BorderStyle = bsDialog;
+	Dlg->Position = poScreenCenter;
+	Dlg->ClientWidth = 270;
+	Dlg->Caption = (Mode == ANT_GIZMO_MODE_ROTATE) ? "Gizmo Rotate" : "Gizmo Move";
+
+	TEdit *EditX = NULL;
+	TEdit *EditY = NULL;
+	TEdit *EditZ = NULL;
+	TEdit *EditDeg = NULL;
+
+	if( Mode == ANT_GIZMO_MODE_ROTATE ){
+		Dlg->ClientHeight = 112;
+		AnsiString AxisText = "Axis: ";
+		AxisText += AntGizmoAxisText(Axis);
+		AntGizmoCreateLabel(Dlg, AxisText.c_str(), 14, 12);
+		AntGizmoCreateLabel(Dlg, "Angle (deg)", 14, 42);
+		EditDeg = AntGizmoCreateEdit(Dlg, 104, 38, 138, TRUE);
+		Dlg->ActiveControl = EditDeg;
+	}
+	else {
+		Dlg->ClientHeight = 162;
+		AnsiString Info = "Delta (";
+		Info += GetLenUnitText();
+		Info += ")";
+		AntGizmoCreateLabel(Dlg, Info.c_str(), 14, 12);
+		AntGizmoCreateLabel(Dlg, "X", 32, 42);
+		AntGizmoCreateLabel(Dlg, "Y", 32, 68);
+		AntGizmoCreateLabel(Dlg, "Z", 32, 94);
+		EditX = AntGizmoCreateEdit(Dlg, 72, 38, 170, (Axis < 0) || (Axis == ANT_GIZMO_AXIS_X));
+		EditY = AntGizmoCreateEdit(Dlg, 72, 64, 170, (Axis < 0) || (Axis == ANT_GIZMO_AXIS_Y));
+		EditZ = AntGizmoCreateEdit(Dlg, 72, 90, 170, (Axis < 0) || (Axis == ANT_GIZMO_AXIS_Z));
+		if( EditX->Enabled ) Dlg->ActiveControl = EditX;
+		else if( EditY->Enabled ) Dlg->ActiveControl = EditY;
+		else Dlg->ActiveControl = EditZ;
+	}
+
+	TButton *OKBtn = new TButton(Dlg);
+	OKBtn->Parent = Dlg;
+	OKBtn->Caption = "OK";
+	OKBtn->Left = 78;
+	OKBtn->Top = Dlg->ClientHeight - 34;
+	OKBtn->Width = 80;
+	OKBtn->ModalResult = mrOk;
+	OKBtn->Default = true;
+
+	TButton *CancelBtn = new TButton(Dlg);
+	CancelBtn->Parent = Dlg;
+	CancelBtn->Caption = "Cancel";
+	CancelBtn->Left = 166;
+	CancelBtn->Top = Dlg->ClientHeight - 34;
+	CancelBtn->Width = 80;
+	CancelBtn->ModalResult = mrCancel;
+	CancelBtn->Cancel = true;
+
+	int ModalResult = Dlg->ShowModal();
+	int Result = FALSE;
+	if( ModalResult == mrOk ){
+		if( Mode == ANT_GIZMO_MODE_ROTATE ){
+			Result = AntGizmoCalcEdit(EditDeg, Angle);
+		}
+		else {
+			Result = AntGizmoCalcEdit(EditX, DX) &&
+				AntGizmoCalcEdit(EditY, DY) &&
+				AntGizmoCalcEdit(EditZ, DZ);
+			if( Result == TRUE ){
+				DX = SetRmdVal(DX);
+				DY = SetRmdVal(DY);
+				DZ = SetRmdVal(DZ);
+			}
+		}
+	}
+	delete Dlg;
+	if( (ModalResult == mrOk) && (Result != TRUE) ) ::MessageBeep(MB_ICONEXCLAMATION);
+	return (ModalResult == mrOk) && (Result == TRUE);
+}
+
 static void AntGizmoRingPoint(int Axis, double CX, double CY, double CZ,
 	double Radius, double Angle, double &X, double &Y, double &Z)
 {
@@ -1767,7 +1888,6 @@ int __fastcall TMainWnd::BeginAntGizmoDrag(int X, int Y)
 {
 	int endpoint, axis, mode;
 	if( HitAntEditGizmo(X, Y, endpoint, axis, mode) != TRUE ) return FALSE;
-	PushAntUndo();
 	int w = Grid2->Row - 1;
 	if( (w < 0) || (w >= ant.wmax) ) return FALSE;
 
@@ -1794,7 +1914,6 @@ int __fastcall TMainWnd::BeginAntGizmoDrag(int X, int Y)
 		if( GetAntGizmoRotationMouseAngle(X, Y, axis, wx, wy, wz, startAngle) != TRUE ) return FALSE;
 	}
 
-	AntGizmoDrag = TRUE;
 	AntGizmoEndpoint = endpoint;
 	AntGizmoAxis = axis;
 	AntGizmoMode = mode;
@@ -1807,10 +1926,106 @@ int __fastcall TMainWnd::BeginAntGizmoDrag(int X, int Y)
 	AntGizmoAngle = 0.0;
 	memcpy(&AntGizmoOldW, wp, sizeof(WDEF));
 	memcpy(AntGizmoOldSelected, ant.wdef, sizeof(AntGizmoOldSelected));
+	AntGizmoDrag = TRUE;
+	AntGizmoDragMoved = FALSE;
 	PBoxAntIgnoreClick = TRUE;
 	PBoxAnt->Cursor = crSizeAll;
 	PBoxAnt->Invalidate();
 	return TRUE;
+}
+//---------------------------------------------------------------------------
+void __fastcall TMainWnd::ResetAntGizmoDrag(void)
+{
+	AntGizmoDrag = FALSE;
+	AntGizmoDragMoved = FALSE;
+	AntGizmoWire = -1;
+	AntGizmoShowSnapVertices = FALSE;
+	AntGizmoMode = ANT_GIZMO_MODE_MOVE;
+	AntGizmoStartAngle = 0.0;
+	AntGizmoAngle = 0.0;
+	PBoxAnt->Cursor = AntDrawMode ? crCross : crDefault;
+	PBoxAnt->Invalidate();
+}
+//---------------------------------------------------------------------------
+int __fastcall TMainWnd::ApplyAntGizmoInput(double DX, double DY, double DZ, double Angle)
+{
+	if( (AntGizmoWire < 0) || (AntGizmoWire >= ant.wmax) ) return FALSE;
+
+	memcpy(ant.wdef, AntGizmoOldSelected, sizeof(WDEF) * ant.wmax);
+	WDEF *wp = &ant.wdef[AntGizmoWire];
+	if( AntGizmoMode == ANT_GIZMO_MODE_ROTATE ){
+		if( ABS(Angle) < 1.0e-12 ) return FALSE;
+		double sx, sy, sz;
+		GetAntGizmoAnchor(sx, sy, sz);
+		for( int i = 0; i < ant.wmax; i++ ){
+			if( !IsAntWireSelected(i) ) continue;
+			memcpy(&ant.wdef[i], &AntGizmoOldSelected[i], sizeof(WDEF));
+			AntRotateWireAroundGizmoAxis(&ant.wdef[i], sx, sy, sz, AntGizmoAxis, Angle);
+		}
+		ant.Edit = ant.Flag = 1;
+		return TRUE;
+	}
+
+	if( (ABS(DX) + ABS(DY) + ABS(DZ)) < 1.0e-12 ) return FALSE;
+
+	if( AntGizmoEndpoint == 0 ){
+		wp->X1 = AntGizmoOldW.X1 + DX;
+		wp->Y1 = AntGizmoOldW.Y1 + DY;
+		wp->Z1 = AntGizmoOldW.Z1 + DZ;
+	}
+	else if( AntGizmoEndpoint == 1 ){
+		wp->X2 = AntGizmoOldW.X2 + DX;
+		wp->Y2 = AntGizmoOldW.Y2 + DY;
+		wp->Z2 = AntGizmoOldW.Z2 + DZ;
+	}
+	else if( AntGizmoEndpoint == 2 ){
+		memcpy(wp, &AntGizmoOldW, sizeof(WDEF));
+		wp->X1 += DX; wp->Y1 += DY; wp->Z1 += DZ;
+		wp->X2 += DX; wp->Y2 += DY; wp->Z2 += DZ;
+	}
+	else if( AntGizmoEndpoint == 3 ){
+		for( int i = 0; i < ant.wmax; i++ ){
+			if( !IsAntWireSelected(i) ) continue;
+			memcpy(&ant.wdef[i], &AntGizmoOldSelected[i], sizeof(WDEF));
+			ant.wdef[i].X1 += DX; ant.wdef[i].Y1 += DY; ant.wdef[i].Z1 += DZ;
+			ant.wdef[i].X2 += DX; ant.wdef[i].Y2 += DY; ant.wdef[i].Z2 += DZ;
+		}
+	}
+
+	if( (ChkWith->Checked == TRUE) && (AntGizmoEndpoint != 3) ){
+		if( AntGizmoEndpoint == 0 ){
+			AntMoveConnectedPoint(ant.wdef, AntGizmoOldSelected, ant.wmax,
+				AntGizmoOldW.X1, AntGizmoOldW.Y1, AntGizmoOldW.Z1,
+				wp->X1, wp->Y1, wp->Z1);
+		}
+		else if( AntGizmoEndpoint == 1 ){
+			AntMoveConnectedPoint(ant.wdef, AntGizmoOldSelected, ant.wmax,
+				AntGizmoOldW.X2, AntGizmoOldW.Y2, AntGizmoOldW.Z2,
+				wp->X2, wp->Y2, wp->Z2);
+		}
+		else if( AntGizmoEndpoint == 2 ){
+			AntMoveConnectedWirePoints(ant.wdef, AntGizmoOldSelected, ant.wmax, AntGizmoOldW, *wp);
+		}
+	}
+
+	ant.Edit = ant.Flag = 1;
+	return TRUE;
+}
+//---------------------------------------------------------------------------
+int __fastcall TMainWnd::ShowAntGizmoInput(void)
+{
+	double dx, dy, dz, angle;
+	if( AntGizmoPromptInput(this, AntGizmoMode, AntGizmoAxis, dx, dy, dz, angle) != TRUE ){
+		return FALSE;
+	}
+	if( (AntGizmoMode == ANT_GIZMO_MODE_ROTATE) && (ABS(angle) < 1.0e-12) ){
+		return FALSE;
+	}
+	if( (AntGizmoMode == ANT_GIZMO_MODE_MOVE) && ((ABS(dx) + ABS(dy) + ABS(dz)) < 1.0e-12) ){
+		return FALSE;
+	}
+	PushAntUndo();
+	return ApplyAntGizmoInput(dx, dy, dz, angle);
 }
 //---------------------------------------------------------------------------
 void __fastcall TMainWnd::GetAntGizmoAnchor(double &X, double &Y, double &Z)
@@ -2107,6 +2322,7 @@ void __fastcall TMainWnd::EndAntGizmoDrag(void)
 	if( !AntGizmoDrag ) return;
 	int w = AntGizmoWire;
 	AntGizmoDrag = FALSE;
+	AntGizmoDragMoved = FALSE;
 	AntGizmoWire = -1;
 	AntGizmoShowSnapVertices = FALSE;
 	AntGizmoMode = ANT_GIZMO_MODE_MOVE;
@@ -2329,6 +2545,11 @@ void __fastcall TMainWnd::PBoxAntMouseDown(TObject *Sender, TMouseButton Button,
 void __fastcall TMainWnd::PBoxAntMouseMove(TObject *Sender, TShiftState Shift, int X, int Y)
 {
 	if( AntGizmoDrag ){
+		if( !AntGizmoDragMoved && (ABS(X - AntGizmoMouseX) < 3) && (ABS(Y - AntGizmoMouseY) < 3) ) return;
+		if( !AntGizmoDragMoved ){
+			PushAntUndo();
+			AntGizmoDragMoved = TRUE;
+		}
 		UpdateAntGizmoDrag(X, Y, Shift);
 		return;
 	}
@@ -2382,8 +2603,23 @@ void __fastcall TMainWnd::PBoxAntMouseUp(TObject *Sender, TMouseButton Button,
 	TShiftState Shift, int X, int Y)
 {
 	if( AntGizmoDrag ){
-		UpdateAntGizmoDrag(X, Y, Shift);
-		EndAntGizmoDrag();
+		int moved = AntGizmoDragMoved || (ABS(X - AntGizmoMouseX) >= 3) || (ABS(Y - AntGizmoMouseY) >= 3);
+		if( moved ){
+			if( !AntGizmoDragMoved ){
+				PushAntUndo();
+				AntGizmoDragMoved = TRUE;
+			}
+			UpdateAntGizmoDrag(X, Y, Shift);
+			EndAntGizmoDrag();
+		}
+		else {
+			int applied = ShowAntGizmoInput();
+			ResetAntGizmoDrag();
+			if( applied ){
+				UpdateAntData();
+				RequestAutoCalc(TRUE);
+			}
+		}
 		PBoxAntIgnoreClick = TRUE;
 		return;
 	}

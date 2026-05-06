@@ -93,6 +93,7 @@ __fastcall TMainWnd::TMainWnd(TComponent* Owner)
 	AntDrawSnapVisible = FALSE;
 	AntDrawSnapX = AntDrawSnapY = AntDrawSnapZ = 0.0;
 	AntGizmoDrag = FALSE;
+	AntGizmoDragMoved = FALSE;
 	AntGizmoEndpoint = 0;
 	AntGizmoAxis = ANT_GIZMO_AXIS_X;
 	AntGizmoWire = -1;
