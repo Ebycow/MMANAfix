@@ -643,6 +643,9 @@ void __fastcall TMainWnd::ReadRegister(void)
 	exeenv.CurDir = pIniFile->ReadInteger("Job", "CurDir", exeenv.CurDir);
 	exeenv.FixFreeAngle = pIniFile->ReadInteger("Job", "FixFreeAngle", exeenv.FixFreeAngle);
 	exeenv.WindowState = pIniFile->ReadInteger("Job", "WindowState", exeenv.WindowState);
+	if( KAutoCalc != NULL ){
+		KAutoCalc->Checked = (pIniFile->ReadInteger("Job", "AutoCalc", KAutoCalc->Checked ? 1 : 0) != 0);
+	}
 
 // 最新のファイル
 	exeenv.RecentMax = pIniFile->ReadInteger("Recent File", "Max", exeenv.RecentMax);
@@ -697,6 +700,9 @@ void __fastcall TMainWnd::WriteRegister(void)
 	pIniFile->WriteInteger("Job", "CurDir", exeenv.CurDir);
 	pIniFile->WriteInteger("Job", "FixFreeAngle", exeenv.FixFreeAngle);
 	pIniFile->WriteInteger("Job", "WindowState", (int)WindowState);
+	if( KAutoCalc != NULL ){
+		pIniFile->WriteInteger("Job", "AutoCalc", KAutoCalc->Checked ? 1 : 0);
+	}
 // 最新のファイル
 	pIniFile->WriteInteger("Recent File", "Max", exeenv.RecentMax);
 	pIniFile->WriteInteger("Recent File", "OnlyMAA", exeenv.RecentMAA);
