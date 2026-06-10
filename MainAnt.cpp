@@ -1355,8 +1355,8 @@ void __fastcall TMainWnd::UpdateAntDrawControls(void)
 {
 	if( AntDrawBtn == NULL ) return;
 
-	bool enabled = exeenv.Ant3D ? true : false;
-	bool selected = (GetAntSelectionCount() > 0) ? true : false;
+	bool enabled = (!CalcBusyDepth && exeenv.Ant3D) ? true : false;
+	bool selected = (!CalcBusyDepth && (GetAntSelectionCount() > 0)) ? true : false;
 	AntDrawBtn->Enabled = enabled;
 	AntDrawXYBtn->Enabled = enabled;
 	AntDrawXZBtn->Enabled = enabled;
@@ -2479,6 +2479,7 @@ void __fastcall TMainWnd::AntViewZoom(int Delta, int X, int Y)
 void __fastcall TMainWnd::PBoxAntMouseDown(TObject *Sender, TMouseButton Button,
 	TShiftState Shift, int X, int Y)
 {
+	if( CalcBusyDepth ) return;
 	PBoxAntMX = X;
 	PBoxAntMY = Y;
 	PBoxAntClickCtrl = Shift.Contains(ssCtrl) ? TRUE : FALSE;
@@ -2544,6 +2545,7 @@ void __fastcall TMainWnd::PBoxAntMouseDown(TObject *Sender, TMouseButton Button,
 //---------------------------------------------------------------------------
 void __fastcall TMainWnd::PBoxAntMouseMove(TObject *Sender, TShiftState Shift, int X, int Y)
 {
+	if( CalcBusyDepth ) return;
 	if( AntGizmoDrag ){
 		if( !AntGizmoDragMoved && (ABS(X - AntGizmoMouseX) < 3) && (ABS(Y - AntGizmoMouseY) < 3) ) return;
 		if( !AntGizmoDragMoved ){
@@ -2602,6 +2604,7 @@ void __fastcall TMainWnd::PBoxAntMouseMove(TObject *Sender, TShiftState Shift, i
 void __fastcall TMainWnd::PBoxAntMouseUp(TObject *Sender, TMouseButton Button,
 	TShiftState Shift, int X, int Y)
 {
+	if( CalcBusyDepth ) return;
 	if( AntGizmoDrag ){
 		int moved = AntGizmoDragMoved || (ABS(X - AntGizmoMouseX) >= 3) || (ABS(Y - AntGizmoMouseY) >= 3);
 		if( moved ){
@@ -2666,6 +2669,10 @@ void __fastcall TMainWnd::PBoxAntMouseUp(TObject *Sender, TMouseButton Button,
 void __fastcall TMainWnd::PBoxAntMouseWheel(TObject *Sender, TShiftState Shift,
 	int WheelDelta, const TPoint &MousePos, bool &Handled)
 {
+	if( CalcBusyDepth ){
+		Handled = TRUE;
+		return;
+	}
 	TPoint pt = PBoxAnt->ScreenToClient(MousePos);
 	if( (pt.x < 0) || (pt.y < 0) || (pt.x >= PBoxAnt->Width) || (pt.y >= PBoxAnt->Height) ) return;
 	Handled = TRUE;

@@ -63,6 +63,12 @@ static void LogPrint(char *ct, ...)
 	MainWnd->CalMemo->Lines->Add(bf);
 }
 
+static int NormalizeLoadType(int Type)
+{
+	if( (Type < 0) || (Type > 2) ) return 0;
+	return Type;
+}
+
 //---------------------------------------------------------------------------
 __fastcall TMainWnd::TMainWnd(TComponent* Owner)
 	: TForm(Owner)
@@ -145,6 +151,7 @@ __fastcall TMainWnd::TMainWnd(TComponent* Owner)
 	AutoCalcTimer->OnTimer = AutoCalcTimerTimer;
 	AutoCalcPending = FALSE;
 	AutoCalcRunning = FALSE;
+	CalcBusyDepth = 0;
 
 	PBoxAnt->OnMouseDown = PBoxAntMouseDown;
 	PBoxAnt->OnMouseMove = PBoxAntMouseMove;
@@ -286,6 +293,10 @@ __fastcall TMainWnd::~TMainWnd(void)
 // アイドル処理  (done == FALSE then  no-message pump)
 void __fastcall TMainWnd::OnIdle(TObject *Sender, bool &Done)
 {
+	if( CalcBusyDepth ){
+		Done = TRUE;
+		return;
+	}
 	if( exeenv.CalcF ){		// 浮動少数点エラーが発生した時
 		exeenv.CalcF = 0;
 		DisCalcUI();
@@ -512,8 +523,23 @@ static int IsEditControlMessage(tagMSG &Msg)
 	return FALSE;
 }
 //---------------------------------------------------------------------------
+static int IsGridControlMessage(tagMSG &Msg)
+{
+	TWinControl *Control = FindControl(Msg.hwnd);
+	if( Control == NULL ) return FALSE;
+	if( Control->InheritsFrom(__classid(TCustomGrid)) ) return TRUE;
+	return FALSE;
+}
+//---------------------------------------------------------------------------
 void __fastcall TMainWnd::OnAppMessage(tagMSG &Msg, bool &Handled)
 {
+	if( CalcBusyDepth ){
+		if( (Msg.message == WM_KEYDOWN) || (Msg.message == WM_MOUSEWHEEL) ){
+			Handled = TRUE;
+		}
+		return;
+	}
+	if( Screen->ActiveForm != this ) return;	// 別フォーム入力中にメイン画面のショートカットを発火させない
 	if( Msg.message == WM_KEYDOWN ){
 		bool ctrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
 		if( (Msg.wParam == VK_ESCAPE) && AntDrawMode ){
@@ -521,9 +547,7 @@ void __fastcall TMainWnd::OnAppMessage(tagMSG &Msg, bool &Handled)
 			Handled = TRUE;
 			return;
 		}
-		if( IsEditControlMessage(Msg) ){
-			if( ctrl || (Msg.wParam == VK_DELETE) ) return;
-		}
+		if( IsEditControlMessage(Msg) ) return;	// テキスト入力中のキーは横取りしない
 		if( (Msg.wParam == VK_DELETE) && !ctrl && !AntDrawMode && (ActiveControl == Grid2) ){
 			DeleteSelectedAntWires();
 			Handled = TRUE;
@@ -554,7 +578,7 @@ void __fastcall TMainWnd::OnAppMessage(tagMSG &Msg, bool &Handled)
 			Handled = TRUE;
 			return;
 		}
-		if( Msg.wParam == 'F' ){
+		if( (Msg.wParam == 'F') && !ctrl && !IsGridControlMessage(Msg) ){
 			CalTrgBtnClick(NULL);
 			Handled = TRUE;
 			return;
@@ -759,64 +783,91 @@ void __fastcall TMainWnd::UpdateAntPreview(void)
 	PBoxAnt->Invalidate();
 }
 //---------------------------------------------------------------------------
+void __fastcall TMainWnd::BeginCalculationUI(void)
+{
+	CalcBusyDepth++;
+	exeenv.CalcF = 1;
+	DisCalcUI();
+}
+//---------------------------------------------------------------------------
+void __fastcall TMainWnd::EndCalculationUI(void)
+{
+	if( CalcBusyDepth > 0 ) CalcBusyDepth--;
+	if( !CalcBusyDepth ) exeenv.CalcF = 0;
+	DisCalcUI();
+}
+//---------------------------------------------------------------------------
 void __fastcall TMainWnd::RunCurrentCalculation(int AddHistory, int CalcLog)
 {
 	if( AutoCalcRunning || exeenv.CalcF ) return;
 	AutoCalcRunning = TRUE;
 	int OldCalcLog = exeenv.CalcLog;
-	GetAntDef();
-	if( ant.cfq == 0.0 ) ant.cfq = ant.fq;
-	SetWaitCursor();
-	ant.Flag = 0;
-	exeenv.CalcLog = CalcLog;
-	if( SetStackAnt() == TRUE ){
-		if( (!env.type) || ((pCalAnt->MinZ + env.antheight) >= 0.0) || (YesNoMB( "一部のワイヤが地中に埋まっています. 計算を中止しますか ?") == IDNO) ){
-			if( AddHistory || !res.GetCnt() ) res.IncResP();
-			res.GetResP()->TYPE = env.type;
-			res.GetResP()->HEIGHT = env.antheight;
-			res.GetResP()->FBR = env.fbr;
-			res.GetResP()->RO = env.RO;
-			res.GetResP()->JXO = env.JXO;
-			res.ClearBWC();
-			Grid1->RowCount = res.GetCnt() + (res.GetCnt() ? 1 : 2);
-			BgnTime = ::GetTickCount();
-			exeenv.CalcF = 1;
-			CalCurrent();
-			exeenv.CalcF = 0;
-			EndTime = ::GetTickCount();
-			if( CalcLog ) LogPrint("%.2lf(s)", double(EndTime - BgnTime)/1000.0);
-			res.SetCalc(ant.Name);
-			res.InitBWC();
-			AntName4->Caption = ant.Name;
-			DrawPtnH.SetMaxDB(res.MaxG);
-			DrawPtnV.SetMaxDB(res.MaxG);
-			UpdateAllViews();
+	int CalcStarted = FALSE;
+	try {
+		GetAntDef();
+		if( ant.cfq == 0.0 ) ant.cfq = ant.fq;
+		SetWaitCursor();
+		ant.Flag = 0;
+		exeenv.CalcLog = CalcLog;
+		if( SetStackAnt() == TRUE ){
+			if( (!env.type) || ((pCalAnt->MinZ + env.antheight) >= 0.0) || (YesNoMB( "一部のワイヤが地中に埋まっています. 計算を中止しますか ?") == IDNO) ){
+				if( AddHistory || !res.GetCnt() ) res.IncResP();
+				res.GetResP()->TYPE = env.type;
+				res.GetResP()->HEIGHT = env.antheight;
+				res.GetResP()->FBR = env.fbr;
+				res.GetResP()->RO = env.RO;
+				res.GetResP()->JXO = env.JXO;
+				res.ClearBWC();
+				Grid1->RowCount = res.GetCnt() + (res.GetCnt() ? 1 : 2);
+				BgnTime = ::GetTickCount();
+				CalcStarted = TRUE;
+				BeginCalculationUI();
+				CalCurrent();
+				EndCalculationUI();
+				CalcStarted = FALSE;
+				EndTime = ::GetTickCount();
+				if( CalcLog ) LogPrint("%.2lf(s)", double(EndTime - BgnTime)/1000.0);
+				res.SetCalc(ant.Name);
+				res.InitBWC();
+				AntName4->Caption = ant.Name;
+				DrawPtnH.SetMaxDB(res.MaxG);
+				DrawPtnV.SetMaxDB(res.MaxG);
+				UpdateAllViews();
+			}
 		}
 	}
-	exeenv.CalcF = 0;
+	catch(...){
+		if( CalcStarted ) EndCalculationUI();
+		exeenv.CalcLog = OldCalcLog;
+		AutoCalcRunning = FALSE;
+		throw;
+	}
 	exeenv.CalcLog = OldCalcLog;
 	AutoCalcRunning = FALSE;
+	if( AutoCalcPending && (KAutoCalc != NULL) && (KAutoCalc->Checked == TRUE) && (AutoCalcTimer != NULL) ){
+		AutoCalcTimer->Interval = 1000;
+		AutoCalcTimer->Enabled = TRUE;
+	}
 }
 //---------------------------------------------------------------------------
 void __fastcall TMainWnd::RequestAutoCalc(int Immediate)
 {
-	if( AutoCalcRunning || exeenv.CalcF ) return;
 	if( (KAutoCalc == NULL) || (KAutoCalc->Checked != TRUE) ){
 		AutoCalcPending = FALSE;
 		if( AutoCalcTimer != NULL ) AutoCalcTimer->Enabled = FALSE;
 		return;
 	}
-	if( !ant.wmax || !ant.cmax ) return;
+	if( !ant.wmax || !ant.cmax ){
+		AutoCalcPending = FALSE;
+		if( AutoCalcTimer != NULL ) AutoCalcTimer->Enabled = FALSE;
+		return;
+	}
 	AutoCalcPending = TRUE;
+	if( AutoCalcRunning || exeenv.CalcF ) return;
 	if( AutoCalcTimer == NULL ) return;
 	AutoCalcTimer->Enabled = FALSE;
-	if( Immediate ){
-		AutoCalcTimerTimer(NULL);
-	}
-	else {
-		AutoCalcTimer->Interval = 600;
-		AutoCalcTimer->Enabled = TRUE;
-	}
+	AutoCalcTimer->Interval = Immediate ? 100 : 1000;
+	AutoCalcTimer->Enabled = TRUE;
 }
 //---------------------------------------------------------------------------
 void __fastcall TMainWnd::AutoCalcTimerTimer(TObject *Sender)
@@ -827,7 +878,11 @@ void __fastcall TMainWnd::AutoCalcTimerTimer(TObject *Sender)
 		return;
 	}
 	if( !AutoCalcPending ) return;
-	if( AntGizmoDrag || AntDrawActive ){
+	if( AntGizmoDrag || AntDrawActive || PBoxAntSelectRect || (PBoxAntDragButton >= 0) ){
+		RequestAutoCalc(FALSE);
+		return;
+	}
+	if( Grid2->EditorMode || Grid3->EditorMode || Grid4->EditorMode ){
 		RequestAutoCalc(FALSE);
 		return;
 	}
@@ -946,6 +1001,9 @@ void __fastcall TMainWnd::SetAntDef(void)
 	sprintf(bf, "%u", ant.EC);
 	EditEC->Text = bf;
 	EditSC->Text = StrDbl(ant.SC);
+	for( int i = 0; i < ant.lmax; i++ ){
+		ant.ldef[i].TYPE = NormalizeLoadType(ant.ldef[i].TYPE);
+	}
 	Grid2->RowCount = ant.wmax + 2;
 	Grid3->RowCount = ant.cmax + 2;
 	Grid4->RowCount = ant.lmax + 2;
@@ -1186,7 +1244,7 @@ void __fastcall TMainWnd::Grid4GetText(LPSTR t, long Col, long Row)
 				break;
 			case 2:		// 種類
 				if( Row < ant.lmax ){
-					strcpy(t, _ttp[ant.ldef[Row].TYPE] );
+					strcpy(t, _ttp[NormalizeLoadType(ant.ldef[Row].TYPE)] );
 				}
 				break;
 			case 3:		// S
@@ -1208,7 +1266,7 @@ void __fastcall TMainWnd::Grid4GetText(LPSTR t, long Col, long Row)
 				break;
 			case 6:		// B1
 				if( Row < ant.lmax ){
-					switch(ant.ldef[Row].TYPE){
+					switch(NormalizeLoadType(ant.ldef[Row].TYPE)){
 						case 0: {	// L,C,Q - Freq
 							double lc = ant.ldef[Row].A[0] * ant.ldef[Row].B[0];
 							if( lc > 0.0 ){
@@ -1227,7 +1285,7 @@ void __fastcall TMainWnd::Grid4GetText(LPSTR t, long Col, long Row)
 				break;
 			default:
 				if( Row < ant.lmax ){
-					if( ant.ldef[Row].TYPE == 2 ){
+					if( NormalizeLoadType(ant.ldef[Row].TYPE) == 2 ){
 						Col = (Col - 3);
 						if( Col & 1 ){
 							strcpy(t, StrDblE(ant.ldef[Row].B[Col/2]));
@@ -1448,8 +1506,8 @@ void __fastcall TMainWnd::Grid4DrawCell(TObject *Sender, int Col, int Row,
 		};
 		X += 4;
 		int N = 0;
-		if( Grid4->Row ){
-			N = ant.ldef[Grid4->Row - 1].TYPE;
+		if( Grid4->Row && (Grid4->Row <= ant.lmax) ){
+			N = NormalizeLoadType(ant.ldef[Grid4->Row - 1].TYPE);
 		}
 		if( N == 2 ){		// S-DOMAIN
 			if( Col < 3 ){
@@ -1651,8 +1709,9 @@ void __fastcall TMainWnd::Grid3SetEditText(TObject *Sender, int ACol,   //ja7ude
 	if( ARow ){
 		Grid3GetText(bf, ACol, ARow);
 		if( !strcmp(AnsiString(Value).c_str(), bf) ) return;
-		PushAntUndo();
 		ARow--;
+		if( ARow >= CMAX ) return;
+		PushAntUndo();
 		OldCmax = ant.cmax;
 		memcpy(&OldC, &ant.cdef[ARow], sizeof(CDEF));
 		switch(ACol){
@@ -1698,9 +1757,12 @@ void __fastcall TMainWnd::Grid3GetEditText(TObject *Sender, int ACol,
 void __fastcall TMainWnd::KS1Click(TObject *Sender)
 {
 	if( Grid4->Row ){
-		LDEF *lp = &ant.ldef[Grid4->Row-1];
-		if( Grid4->Row > ant.lmax ){
-			Grid4NewLine(Grid4->Row-1);
+		int Row = Grid4->Row - 1;
+		if( (Row < 0) || (Row >= LMAX) ) return;
+		LDEF *lp = &ant.ldef[Row];
+		if( Row >= ant.lmax ){
+			Grid4NewLine(Row);
+			if( Row >= ant.lmax ) return;
 			lp->TYPE = -1;
 		}
 		if( lp->TYPE != 0 ){
@@ -1717,9 +1779,12 @@ void __fastcall TMainWnd::KS1Click(TObject *Sender)
 void __fastcall TMainWnd::KS2Click(TObject *Sender)
 {
 	if( Grid4->Row ){
-		LDEF *lp = &ant.ldef[Grid4->Row-1];
-		if( Grid4->Row > ant.lmax ){
-			Grid4NewLine(Grid4->Row-1);
+		int Row = Grid4->Row - 1;
+		if( (Row < 0) || (Row >= LMAX) ) return;
+		LDEF *lp = &ant.ldef[Row];
+		if( Row >= ant.lmax ){
+			Grid4NewLine(Row);
+			if( Row >= ant.lmax ) return;
 			lp->TYPE = -1;
 		}
 		if( lp->TYPE != 1 ){
@@ -1733,9 +1798,12 @@ void __fastcall TMainWnd::KS2Click(TObject *Sender)
 void __fastcall TMainWnd::KS3Click(TObject *Sender)
 {
 	if( Grid4->Row ){
-		LDEF *lp = &ant.ldef[Grid4->Row-1];
-		if( Grid4->Row > ant.lmax ){
-			Grid4NewLine(Grid4->Row-1);
+		int Row = Grid4->Row - 1;
+		if( (Row < 0) || (Row >= LMAX) ) return;
+		LDEF *lp = &ant.ldef[Row];
+		if( Row >= ant.lmax ){
+			Grid4NewLine(Row);
+			if( Row >= ant.lmax ) return;
 			lp->TYPE = -1;
 		}
 		if( lp->TYPE != 2 ){
@@ -1777,8 +1845,9 @@ void __fastcall TMainWnd::Grid4SetEditText(TObject *Sender, int ACol,
 	if( ARow ){
 		Grid4GetText(bf, ACol, ARow);
 		if( !strcmp(AnsiString(Value).c_str(), bf) ) return;
-		PushAntUndo();
 		ARow--;
+		if( ARow >= LMAX ) return;
+		PushAntUndo();
 		OldLmax = ant.lmax;
 		memcpy(&OldL, &ant.ldef[ARow], sizeof(LDEF));
 		switch(ACol){
@@ -1865,9 +1934,11 @@ void __fastcall TMainWnd::Grid4SetEditText(TObject *Sender, int ACol,
 			default:
 				if( ant.ldef[ARow].TYPE == 2 ){
 					ACol = (ACol - 3);
-					if( Calc(d, AnsiString(Value).c_str()) == TRUE ){
+					if( ACol < 0 ) break;
+					if( Calc(d, AnsiString(Value).c_str()) != TRUE ){
 						d = NULLV;
 					}
+					if( (ACol/2) >= SMAX ) break;
 					if( ACol & 1 ){
 						ant.ldef[ARow].B[ACol/2] = d;
 					}
@@ -2596,7 +2667,7 @@ void __fastcall TMainWnd::EditDM1Change(TObject *Sender)
 	int		dm1;
 
 	CalcU(dm1, AnsiString(EditDM1->Text).c_str());
-	if( dm1 != ant.DM1 ){
+	if( (dm1 > 0) && (dm1 != ant.DM1) ){
 		ant.DM1 = dm1;
 		if( ant.wmax ) ant.Edit = ant.Flag = 1;
 	}
@@ -2608,7 +2679,7 @@ void __fastcall TMainWnd::EditDM2Change(TObject *Sender)
 	int		dm2;
 
 	CalcU(dm2, AnsiString(EditDM2->Text).c_str());
-	if( dm2 != ant.DM2 ){
+	if( (dm2 > 0) && (dm2 != ant.DM2) ){
 		ant.DM2 = dm2;
 		if( ant.wmax ) ant.Edit = ant.Flag = 1;
 	}
@@ -2634,7 +2705,7 @@ void __fastcall TMainWnd::EditSCChange(TObject *Sender)
 	double	sc;
 
 	if( Calc(sc, AnsiString(EditSC->Text).c_str()) == TRUE ){
-		if( sc != ant.SC ){
+		if( (sc > 1.0) && (sc <= 3.0) && (sc != ant.SC) ){
 			ant.SC = sc;
 			if( ant.wmax ) ant.Edit = ant.Flag = 1;
 		}
@@ -2700,15 +2771,25 @@ void __fastcall TMainWnd::ACalBtnClick(TObject *Sender)
 			AntName4->Caption = ant.Name;
 			SaveAntStrings(antDef);		// 最適化前状態を保存
 			pACal->DispStat(CalMemo);
-			exeenv.CalcF = 1;
-			DisCalcUI();
-			Application->ProcessMessages();
-			BgnTime = ::GetTickCount();
-			int r = pACal->Execute();	// 最適化計算
-			EndTime = ::GetTickCount();
+			int CalcStarted = FALSE;
+			int r = FALSE;
+			BeginCalculationUI();
+			CalcStarted = TRUE;
+			try {
+				Application->ProcessMessages();
+				BgnTime = ::GetTickCount();
+				r = pACal->Execute();	// 最適化計算
+				EndTime = ::GetTickCount();
+				EndCalculationUI();
+				CalcStarted = FALSE;
+			}
+			catch(...){
+				if( CalcStarted ) EndCalculationUI();
+				delete Box;
+				throw;
+			}
 			LogPrint("%.2lf(s)", double(EndTime - BgnTime)/1000.0);
 			ant.Edit = 1;
-			exeenv.CalcF = 0;
 			res.SetRes(&pACal->maxres);
 			res.InitBWC();
 			DrawPtnH.SetMaxDB(res.MaxG);
@@ -2720,7 +2801,6 @@ void __fastcall TMainWnd::ACalBtnClick(TObject *Sender)
 			if( (r == TRUE) && (YesNoMB("最適化を終了しました.結果を最適化シートに保存しますか？")== IDYES) ){
 				K20Click(NULL);
 			}
-			DisCalcUI();
 			UpdateAllViews();
 		}
 		delete Box;
@@ -2998,6 +3078,16 @@ void __fastcall TMainWnd::DisCalcUI(void)
 	PrintBtn->Enabled = f;
 	EleBtn->Enabled = f;
 	WireSel->Enabled = f;
+	if( AntDrawBtn != NULL ) AntDrawBtn->Enabled = f;
+	if( AntDrawXYBtn != NULL ) AntDrawXYBtn->Enabled = f;
+	if( AntDrawXZBtn != NULL ) AntDrawXZBtn->Enabled = f;
+	if( AntDrawYZBtn != NULL ) AntDrawYZBtn->Enabled = f;
+	if( AntDrawCancelBtn != NULL ) AntDrawCancelBtn->Enabled = f;
+	if( AntAlignX0Btn != NULL ) AntAlignX0Btn->Enabled = f;
+	if( AntAlignY0Btn != NULL ) AntAlignY0Btn->Enabled = f;
+	if( AntAlignZ0Btn != NULL ) AntAlignZ0Btn->Enabled = f;
+	if( AntRotate90Btn != NULL ) AntRotate90Btn->Enabled = f;
+	if( AntRotationGizmoBtn != NULL ) AntRotationGizmoBtn->Enabled = f;
 }
 //---------------------------------------------------------------------------
 // 最適化結果一覧

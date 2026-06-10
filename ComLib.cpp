@@ -385,6 +385,7 @@ double GetNormal(double d)
 double GetSCNormal(double d)
 {
 	if( d == 0 ) return d;
+	if( (d != d) || (d > MAXDOUBLE) || (d < -MAXDOUBLE) ) return 0;	// NaN/inf は10倍/10除算で収束せず無限ループになる
 	int n;
 	double	sgn = SGN(d);
 	d = ABS(d);
@@ -709,12 +710,23 @@ void AddWZ(ANTDEF *ap, double x1, double y1, double z1, double x2, double y2, do
 }
 #define	DM2DEF	0.85	// DM2分割の拡大許容範囲
 ///----------------------------------------------------------------
+///  分割パラメータの正規化(SC<=1.0やDM2<=0のまま分割すると無限ループ・ゼロ除算になるため)
+static void AdjTeiParam(ANTDEF *ap)
+{
+	if( (ap->SC <= 1.0) || (ap->SC > 3.0) ) ap->SC = 2.0;
+	if( ap->DM1 <= 0 ) ap->DM1 = 400;
+	if( ap->DM2 <= 0 ) ap->DM2 = 40;
+	if( ap->EC < 1 ) ap->EC = 1;
+}
+///----------------------------------------------------------------
 ///  自動均等分割の処理を行う
 void TeiAvg(ANTDEF *ap, double x1, double y1, double z1, double x2, double y2, double z2, double R, int DM, int wno)
 {
 	double	xx, yy, zz, d;
 	int		N;
 
+	AdjTeiParam(ap);
+	if( DM <= 0 ) DM = ap->DM2;
 	R = ABS(R);
 	xx = x2 - x1;
 	yy = y2 - y1;
@@ -738,6 +750,9 @@ void Tei(ANTDEF *ap, double x1, double y1, double z1, double x2, double y2, doub
 	double	dm;
 	int		N, NT, NL;
 
+	AdjTeiParam(ap);
+	if( dm1 <= 0.0 ) dm1 = double(ap->DM1);
+	if( dm2 <= 0.0 ) dm2 = double(ap->DM2);
 	R = ABS(R);
 	xx = x2 - x1;
 	yy = y2 - y1;
@@ -813,6 +828,9 @@ void TeiB(ANTDEF *ap, double x1, double y1, double z1, double x2, double y2, dou
 	double	dm;
 	int		N, NT;
 
+	AdjTeiParam(ap);
+	if( dm1 <= 0.0 ) dm1 = double(ap->DM1);
+	if( dm2 <= 0.0 ) dm2 = double(ap->DM2);
 	R = ABS(R);
 	xx = x2 - x1;
 	yy = y2 - y1;
@@ -860,6 +878,9 @@ void TeiE(ANTDEF *ap, double x1, double y1, double z1, double x2, double y2, dou
 	double	dm;
 	int		N, NT;
 
+	AdjTeiParam(ap);
+	if( dm1 <= 0.0 ) dm1 = double(ap->DM1);
+	if( dm2 <= 0.0 ) dm2 = double(ap->DM2);
 	R = ABS(R);
 	xx = x2 - x1;
 	yy = y2 - y1;
@@ -1443,12 +1464,16 @@ int ReadAntFromFp(ANTDEF *ap, AnsiString &rem, FILE *fp, int AllowNoRem)
 	if( (ap->lmax < 0) || (ap->lmax > LMAX) ) return FALSE;
 	if( ap->lmax ){
 		if( !ReadBlock(fp, ap->ldef, sizeof(LDEF) * ap->lmax) ) return FALSE;
+		for( int i = 0; i < ap->lmax; i++ ){
+			if( (ap->ldef[i].TYPE < 0) || (ap->ldef[i].TYPE > 2) ) ap->ldef[i].TYPE = 0;
+		}
 	}
 
 	if( !ReadBlock(fp, &ap->DM1, sizeof(ap->DM1)) ) return FALSE;
 	if( !ReadBlock(fp, &ap->DM2, sizeof(ap->DM2)) ) return FALSE;
 	if( !ReadBlock(fp, &ap->SC, sizeof(ap->SC)) ) return FALSE;
 	if( !ReadBlock(fp, &ap->EC, sizeof(ap->EC)) ) return FALSE;
+	AdjTeiParam(ap);
 
 	if( !ReadBlock(fp, &ap->StackVT, sizeof(ap->StackVT)) ) return FALSE;
 	if( !ReadBlock(fp, &ap->StackV, sizeof(ap->StackV)) ) return FALSE;
@@ -1978,7 +2003,7 @@ void WriteCur(ANTDEF *ap, int W, int P, float I, float IJ, float Mag, float Deg)
 		if( P < ap->wzdef[i].PNo ) break;
 	}
 	i--;
-	while( !ap->wzdef[i].PNo ) i--;
+	while( (i > 0) && !ap->wzdef[i].PNo ) i--;
 	if( i < 0 ) i = 0;
 	int S = ap->wzdef[i].SNo + (P - ap->wzdef[i].PNo);
 	P--;

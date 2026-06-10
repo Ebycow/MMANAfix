@@ -392,6 +392,7 @@ void __fastcall TMainWnd::LoadAntStrings(AnsiString &in)
 		ZSCopy(ant.ldef[i].PLUS, t, 8);
 		p = StrDlm(t, p);	// TYPE
 		CalcU(ant.ldef[i].TYPE, t);
+		if( (ant.ldef[i].TYPE < 0) || (ant.ldef[i].TYPE > 2) ) ant.ldef[i].TYPE = 0;
 		switch(ant.ldef[i].TYPE){
 			case 0:		// L,C,Q
 				p = StrDlm(t, p);	// L

@@ -387,6 +387,8 @@ private:	// ユーザー宣言
 	void __fastcall RequestAutoCalc(int Immediate);
 	void __fastcall AutoCalcTimerTimer(TObject *Sender);
 	void __fastcall AutoCalcMenuClick(TObject *Sender);
+	void __fastcall BeginCalculationUI(void);
+	void __fastcall EndCalculationUI(void);
 
 	void __fastcall InitAntDef(void);
 	void __fastcall SetAntDef(void);
@@ -534,6 +536,7 @@ private:	// ユーザー宣言
 	TTimer	*AutoCalcTimer;
 	int		AutoCalcPending;
 	int		AutoCalcRunning;
+	int		CalcBusyDepth;
 	int		AntDrawMode;
 	int		AntRotationGizmoVisible;
 	int		AntDrawActive;
