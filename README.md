@@ -1,3 +1,5 @@
+# このプロジェクトは　https://github.com/Ebycow/MMMANA　でRustに移植作業中です。今後のアップデートはそちらで行います。
+
 # MMANA — アンテナ設計・解析プログラム
 
 MMANAは、**JE3HHT 森 誠氏**が開発されたWindows用アンテナ設計・解析ソフトウェアです。  
